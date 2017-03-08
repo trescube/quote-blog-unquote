@@ -1,0 +1,100 @@
+title=Negative Tests for Regular Expressions
+date=2015-04-02
+type=post
+tags=generative testing, regex, negative test, negative testing, groovy, spock
+status=published
+~~~~~~
+
+In the last post I discussed generating structured random inputs using RandomStringBuilder.  This is all well and good for tests that we expect to pass, but what about negatively testing inputs?  That is, testing inputs that should fail.  For sufficiently complex regular expressions, it's quite easy to introduce an unwanted quantifier or pattern.  To revisit the Canadian postal code regular expression from prior posts, it's a subtle mistake to inadvertently change
+
+<pre class="prettyprint"><code>/(?i)^([A-Z][0-9][A-Z])(?:[ -]?([0-9][A-Z][0-9]))?$/</code></pre>
+
+to include the 1-or-more <b>+</b> quantifier:
+
+<pre class="prettyprint"><code>/(?i)^([A-Z]+[0-9][A-Z])(?:[ -]?([0-9][A-Z][0-9]))?$/</code></pre>
+<!--break-->
+This would make inputs like "KK1A 0B1" valid whereas it is clearly invalid.  To deal with negatively testing regular expressions, I added a class named RegexBuilder to the RandomStringBuilder library, available here:
+
+https://github.com/stephenkhess/RandomStringBuilder
+
+A quick disclaimer, RegexBuilder is <b>not</b> to be able to generate very complicated regular expressions, but it's useful for building optional and quantified literal values and character ranges.  
+
+Once again, here's the class under test:
+
+<pre class="prettyprint"><code>class CanadianPostalCodeFormatter {
+    def format(input) {
+        // regex that captures the forward sortation area (the first part),
+        //  the optional local delivery unit (the second part), and ignores the delimiter
+        def matcher = input =~ /(?i)^([A-Z][0-9][A-Z])(?:[ -]?([0-9][A-Z][0-9]))?$/
+        
+        if (matcher.size() > 0) {
+            // return the concatenated-by-space non-null matched groups
+            matcher[0][1..2].findAll{ it }*.toUpperCase().join(" ")
+        }
+
+    }
+
+}</code></pre>
+
+If an input doesn't match the Canadian postal code format then the method should return null.  The idea behind this approach is to create inputs that are close to being matches but do not match the regular expressions.  Here's a Spock test that generates 5000 inputs that <b>don't</b> match either the short or extended Canadian postal code format:
+
+<pre class="prettyprint"><code>def "inputs not matching Canadian postal code patterns should return null"() {
+    given:
+    def formatter = new CanadianPostalCodeFormatter()
+
+    expect:
+    formatter.format(invalidInput) == null
+
+    where: "create inputs that don't match short- or extended-form CA postalcode patterns"
+    invalidInput &lt;&lt; {
+        // Spock doesn't allow variable definitions directly in the 
+        // where: block, so declare this way.
+        // Alternatively the patterns could be declared as @Shared at the class level
+        def shortFormPattern = Pattern.compile(new RegexBuilder().
+                oneLetter().oneNumber().oneLetter().
+                build())
+            
+        def longFormPattern = Pattern.compile(new RegexBuilder().
+                oneLetter().oneNumber().oneLetter().
+                zeroOrMoreCharactersOf(" \t-").
+                oneNumber().oneLetter().oneNumber().
+                build())
+        
+        // generate 5000 inputs that don't match either supported input format
+        (1..5000).collect {
+            new RandomStringBuilder().
+                randomUpperLimit(5). // at most 5 characters for each call
+                atLeastOneAlphaNumeric().
+                optionalCharactersOf(" \t-").
+                atLeastOneAlphaNumeric().
+                build()
+        }.findAll {
+            !(it ==~ longFormPattern)
+        }.findAll {
+            !(it ==~ shortFormPattern)
+        }
+    }()
+
+}
+</code></pre>
+
+When I ran this locally on my Macbook Pro, 4995 qualifying inputs were generated and executed in 0.815 seconds.  Here's a sample of the generated inputs:
+
+<pre class="prettyprint"><code>O-Xl4H
+rDXs-  RXBH
+BaZb3GS
+nRHV0
+uKr  8dB</code></pre>
+
+To carry the concept to UK postal codes, RegexBuilder can be used as follows:
+
+<pre class="prettyprint"><code>new RegexBuilder().
+    betweenMAndNLetters(1, 2).
+    oneNumber().
+    optionalAlphaNumeric().
+    optionalSpace().
+    oneNumber().
+    nLetters(2).
+    build()</code></pre>
+
+This will generate the regular expression: <pre><code>[a-zA-Z]{1,2}[0-9][a-zA-Z0-9]?[ ]?[0-9][a-zA-Z]{2}</code></pre>

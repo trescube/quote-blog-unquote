@@ -1,0 +1,93 @@
+title=Testing output to stdout and stderr
+date=2011-12-7
+type=post
+tags=java, tdd, system.out, system.err
+status=published
+~~~~~~
+
+<p>Lots of classes and applications I've written at some point output information to <code>System.out</code> and <code>System.err</code>.  Sometimes it's quick-and-dirty debugging but if the output is meaningful, testing what's written to either is a pretty simple thing to do. </p>
+<p>For this post, I've created a helper class with two static methods that write to <code>System.out</code> and <code>System.err</code>:</p>
+<pre class="prettyprint">
+<code>class SystemOutAndSystemErrHelper {
+    public static void writeToSystemOut(String text) {
+        System.out.println("writing '" + text + "' to stdout");
+    }
+    
+    public static void writeToSystemErr(String text) {
+        System.err.println("writing '" + text + "' to stderr");
+    }
+    
+}</code></pre>
+<!--break-->
+<p>Where <code>System.out</code> and <code>System.err</code> write output to can be overridden by calling <code>System.setOut</code> and <code>System.setErr</code>, supplying <code>PrintStream</code> instances.  The <code>PrintStream</code> objects themselves are instantiated with an <code>OutputStream</code> instance that I can easily interrogate later. </p>
+<p>In this first test, I instantiate a <code>PrintStream</code> with a <code>ByteArrayOutputStream</code>:</p>
+<pre class="prettyprint">
+<code>@Test
+public void dataShouldBeWrittenToSystemOut() {
+    String newline = System.getProperty("line.separator");
+    
+    // the PrintStream will be instantiated with a ByteArrayOutputStream
+    //  that we'll read from later
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    PrintStream ps = new PrintStream(baos);
+    
+    System.setOut(ps);
+    
+    SystemOutAndSystemErrHelper.writeToSystemOut("some output text");
+    
+    String actual = new String(baos.toByteArray());
+    String expected = "writing 'some output text' to stdout" + newline;
+    
+    assertThat(actual, is(expected));
+    
+}</code>
+</pre>
+<p>After calling <code>System.setOut</code> with the constructed <code>PrintStream</code>, the helper object writes some text to <code>System.out</code>.  Testing is as easy then as constructing a <code>String</code> with the bytes from the <code>ByteArrayOutputStream</code> and making an assertion about the contents of the output. </p>
+<p>Testing the output to <code>System.err</code> is very similar, the only difference being calling <code>System.setErr</code> in my test instead:</p>
+<pre class="prettyprint">
+<code>@Test
+public void dataShouldBeWrittenToSystemErr() {
+    String newline = System.getProperty("line.separator");
+    
+    // the PrintStream will be instantiated with a ByteArrayOutputStream
+    //  that we'll read from later
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    PrintStream ps = new PrintStream(baos);
+    
+    System.setErr(ps);
+    
+    SystemOutAndSystemErrHelper.writeToSystemErr("some error text");
+    
+    String actual = new String(baos.toByteArray());
+    String expected = "writing 'some error text' to stderr" + newline;
+    
+    assertThat(</code><code>actual</code><code>, is(expected));
+    
+}</code>
+</pre>
+<p>If I'm not concerned about which handle the data was written to and only that it got written somewhere, I can pass the same <code>PrintStream</code> to <code>System.setErr</code> and <code>System.setOut</code>:</p>
+<pre class="prettyprint">
+<code>@Test
+public void dataShouldBeWrittenToSystemOutAndSystemErr() {
+    String newline = System.getProperty("line.separator");
+    
+    // the PrintStream will be instantiated with a ByteArrayOutputStream
+    //  that we'll read from later
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    PrintStream ps = new PrintStream(baos);
+    
+    System.setOut(ps);
+    System.setErr(ps);
+    
+    SystemOutAndSystemErrHelper.writeToSystemOut("some output text");
+    SystemOutAndSystemErrHelper.writeToSystemErr("some error text");
+    
+    String actual = new String(baos.toByteArray());
+    String expected = "writing 'some output text' to stdout" + newline +
+                    "writing 'some error text' to stderr" + newline;
+    
+    assertThat(</code><code>actual</code><code>, is(expected));
+    
+}</code>
+</pre>
+<p>In my examples I used a <code>ByteArrayOutputStream</code> for simple conversion to a <code>String</code>, but I could've just as easily used a <code>FileOutputStream</code>, <code>ObjectOutputStream</code>, or any other <code>OutputStream</code> subclass. </p>

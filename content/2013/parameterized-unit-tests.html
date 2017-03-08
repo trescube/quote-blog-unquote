@@ -1,0 +1,99 @@
+title=Parameterized Tests are Freakin' Awesome for Unit Testing Regular Expressions
+date=2013-01-27
+type=post
+tags=parameterized, unit test, regex, regular expressions
+status=published
+~~~~~~
+
+<p>I've been looking for a good reason to use parameterized tests for awhile now and I finally discovered a great one:  testing regular expressions.  This is especially useful for case-insensitive regexes with lots of OR (|) conditions.  </p>
+<!--break-->
+
+<p>Let's say we have a regex that matches the 4 main directionals, both full word and single-letter abbreviations and case-insensitive.  This regex would be:</p>
+
+<pre class="prettyprint">
+<code>^(N(orth)?|S(outh)?|W(est)?|E(ast)?)$</code></pre>
+
+<p>It's pretty easy to get started testing something like this, I would want to make sure I got "<strong>N</strong>" and "<strong>North</strong>" covered:</p>
+
+<pre class="prettyprint">
+<code>@Test
+public void inputConsistingSolelyOfLetterNShouldMatch() {
+    // Given a string = "N"
+    String input = "N";
+    
+    // And a matcher on directionPattern
+    Matcher matcher = directionalPattern.matcher(input);
+    
+    // Then matcher.matches should return true
+    assertThat(matcher.matches(), is(true));
+}
+
+@Test
+public void inputConsistingOfWordNorthShouldMatch() {
+    // Given a mixed case word "north"
+    String input = "nOrTh";
+
+    // And a matcher on directionPattern
+    Matcher matcher = directionalPattern.matcher(input);
+    
+    // Then matcher.matches should return true
+    assertThat(matcher.matches(), is(true));
+}
+</code></pre>
+
+<p>But with 8 of these and a negative test, it gets pretty repetitive and if the regex contains lots of conditional matching it can become a huge pain to maintain.  Fortunately parameterized tests in jUnit make this a breeze while keeping all the test data in one place.  Here are all 8 tests plus 1 negative test in one tidy, easy-to-read place:</p>
+
+<pre class="prettyprint">
+<code>@RunWith(Parameterized.class)
+public class ParameterizedRegexTest {
+    Pattern directionalPattern = Pattern.compile("^(N(orth)?|S(outh)?|W(est)?|E(ast)?)$", 
+        Pattern.CASE_INSENSITIVE);
+
+    @Parameters(name="{index}: \"{0}\" - {1}")
+    public static Iterable data() {
+        return Arrays.asList(new Object[][] {
+            { "N", true },
+            { "nOrTh", true },
+            { "s", true },
+            { "SOuTh", true },
+            { "E", true },
+            { "east", true },
+            { "w", true },
+            { "WEST", true },
+            { "this isn't a directional", false }
+        });
+    }
+
+    private String input;
+    private Boolean expectedToMatch;
+    
+    public ParameterizedRegexTest(String input, Boolean expectedToMatch) {
+        this.input = input;
+        this.expectedToMatch = expectedToMatch;
+    }
+    
+    @Test
+    public void theDirectionalPatternMatchingOnTheInputShouldReturnWhatIsExpected() {
+        // Given a matcher on directionalPattern from the constructor input
+        Matcher matcher = directionalPattern.matcher(input);
+        
+        // Expect matcher.matches should return what's expected
+        assertThat(matcher.matches(), is(expectedToMatch));
+    }
+}</code></pre>
+
+<p>Each <code>String</code>/<code>Boolean</code> combination in <code>data</code> will be used to construct an instance of ParameterizedRegexTest and all @Test-annotated methods will be run.  </p>
+
+<p>Here's what happens when I run my test class in Eclipse:</p>
+
+<p><img alt="" src="/images/parameterized-success.png" style="width: 453px; height: 314px;" /></p>
+
+<p>Success!  All 9 tests were generated on the fly and run by jUnit.  </p>
+
+<p>If I screwed up and accidentally mistyped "<strong>WEST</strong>" as "<strong>WEST!</strong>", I'd see 1 red failure and 8 green successes:</p>
+
+<p><img alt="" src="/images/parameterized-failure.png" style="width: 456px; height: 362px;" /></p>
+
+<p>The index on the left of each test name makes it easy to see which test is broken without having to scroll thru an exhaustive list.  The <code>name</code> parameter of the @Parameters annotation allows me to format the display of the test to something readable.  </p>
+
+<p>Some of my more complex regular expressions are not really that complex but have up to 50 test inputs.  Parameterized tests in jUnit make maintaining all my inputs and expected results easy to read and concise.</p>

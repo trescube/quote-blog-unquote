@@ -1,0 +1,200 @@
+title=Unit-testing with Log4j
+date=2012-02-19
+type=post
+tags=tdd, log4j, OCD, unit testing
+status=published
+~~~~~~
+
+<p><span style="font-size:10px;"><em>(It's been awhile since I've last posted but I agonize over wording so it takes a few hours from start to finish to write these articles)</em></span></p>
+<h3>
+	Testing Log4j Output</h3>
+<p>So you've diligently written some thorough tests but our benevolent lord and savior, <a href="http://cobertura.sourceforge.net/" target="_blank">Cobertura</a>, that wants only good things for us informs you that those pesky conditionally-executed logging statements are uncovered.  Or maybe you just want to verify that your logging statements are being output.  If either of these statements apply to your situation, then this article is for you.  <br />
+	<br />
+	Before I get started, and I cannot stress this enough, <strong>excessive testing of log4j statements (especially DEBUG) will cause your tests to become extremely brittle!</strong>  Your coworkers will become very annoyed with you if the debugging statements they're adding to diagnose a logic problem are causing tests to fail.  I'll address how to get around this later on in the section entitled <a href="#beatings">"How to Avoid Being Beaten to Death"</a>. </p>
+<!--break-->
+<h3>
+	The Problem</h3>
+<p>Okay, let's get started.  Out of the box, your Logger objects have no configuration loaded by the test harness so all logging is turned off by default.  There are a few approaches to resolving this:</p>
+<ol>
+	<li>
+		make all your Logger objects public</li>
+	<li>
+		inject your Logger objects via constructor</li>
+	<li>
+		classload your log4j configuration</li>
+	<li>
+		accept that you're not a god and having some untested code is okay sometimes</li>
+</ol>
+<p>Don't even try the first option, it's a terrible programming practice, I feel dirty for even mentioning it.  The second option is really heavy and would require lots of refactoring, plus you'd have to add tests to verify that the injected Logger is appropriately tied to the correct class, if applicable.  You could try the third option but if your log4j configuration writes to any external resources like a file or database you'd incur a decent amount of setup and teardown logic.  You probably wouldn't be reading this article if the fourth approach described your lazy ass so you want an actual answer.  Fortunately, there's a fairly simple solution: programmatically setting up a log4j configuration in your test.  By grabbing the root Logger and adding a WriterAppender and level, you can direct output to an OutputStream instance which is trivial to convert to a String and parse through. </p>
+<h3>
+	Testing All Log4j Logging</h3>
+<p>Here's a test method I wrote that calls a factory that creates Plebeian POJO from comma-delimited strings:</p>
+<pre class="prettyprint">
+<code>@Test
+public void nullInputToGetInstanceShouldLogADebugAndErrorMessageReturningNull() {
+    // given
+    // if the root Logger already has some appenders, fail because our test
+    //  environment isn't what we're expecting
+    Logger rootLogger = Logger.getRootLogger();
+    if (rootLogger.getAllAppenders().hasMoreElements()) {
+        fail("Root logger already has appenders!");
+    }
+   
+    // setup the OutputStream to be written to by the logger
+    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+    rootLogger.addAppender(new WriterAppender(new SimpleLayout(),
+            outputStream));
+    rootLogger.setLevel(Level.DEBUG);
+   
+    // when
+    Plebeian plebeian = PlebeianFactory.getInstance(null);
+   
+    // then
+    assertThat(plebeian, is(nullValue()));
+   
+    // split the output by newline, here we're taking advantage of the fact
+    //  the String.split doesn't preserve the empty string if the delimiter
+    //  appears at the end of the input
+    String[] logStatements = new String(outputStream.toByteArray())
+            .split(lineSeparator);
+    assertThat(logStatements.length, is(2));
+    assertThat(logStatements[0],
+            is("DEBUG - getInstance received input: 'null'"));
+    assertThat(logStatements[1],
+            is("ERROR - Delimited String input cannot be null"));
+}</code></pre>
+<p>Note that my assertions rely on SimpleLayout so a different layout may require adjustments. The contents of my PlebeianFactory class are pretty cut-and-dry:</p>
+<pre class="prettyprint">
+<code>public class PlebeianFactory {
+    private static Logger logger = Logger.getLogger(PlebeianFactory.class);
+   
+    public static Plebeian getInstance(String delimitedInput) {
+        if (logger.isDebugEnabled()) {
+            logger.debug("getInstance received input: '" + delimitedInput + "'");
+        }
+   
+        if (null == delimitedInput) {
+            logger.error("Delimited String input cannot be null");
+            return null;
+        }
+   
+        String[] parts = delimitedInput.split(",");
+   
+        // I'm not testing everything under the sun here, just showing
+        //  how to test log4j  
+        Plebeian plebeian = new Plebeian(parts[1], parts[2], parts[0]);
+   
+        if (logger.isDebugEnabled()) {
+            logger.debug("constructed Plebeian object: " + plebeian);
+        }
+   
+        return plebeian;
+    }
+}</code></pre>
+<h3>
+	Static Loggers</h3>
+<p>Like my example, chances are your Logger instances are static so the Appenders added in one test will exist in the next test. In unit testing, each test should be able to run independently and not depend on state set by other tests, so in this example you'd need to add an @After-annotated method to your test class to perform some cleanup. In fact, failure to reset your root Logger state would result in both appenders writing to the same OutputStream, doubling the number of logging messages. Fortunately, resetting the root Logger configuration means just removing all the appenders added by your test:</p>
+<pre class="prettyprint">
+<code>@After
+public void teardown() {
+    Logger.getRootLogger().removeAllAppenders();
+}</code></pre>
+<p>A more complicated configuration in your particular setup may require additional reset procedures.</p>
+<h3 id="beatings">
+	How to Avoid Being Beaten to Death</h3>
+<p>At the beginning of this post I mentioned that you'll likely drive your coworkers to violence with overuse of testing every last log4j logging event. You could just set the logging level in your tests to INFO but then you're back to less than 100% coverage if you have conditionally-executed debug logging statements. The best way I've found to handle this scenario is to set the logging level to DEBUG in your tests, but then filter out all DEBUG-level statements before making your assertions. Here's a simple helper utility method to do so:</p>
+<pre class="prettyprint"><code>private List&lt;String&gt; filterOutDebugStatements(String[] statements) {
+    List&lt;String&gt; nonDebugStatements = new ArrayList&lt;String&gt;();
+    
+    for (String statement : statements) {
+        if (!statement.startsWith("DEBUG")) {
+            nonDebugStatements.add(statement);
+        }
+    }
+    
+    return nonDebugStatements;
+}</code></pre>
+<p>This has the added benefit of returning a List where splitting on newline returned an array so making all your assertions around a List context assures that you don't forget to filter first. Here's a test where we're only concerned with the non-DEBUG statements logged:</p>
+<pre class="prettyprint">
+<code>@Test
+public void nullInputToGetInstanceShouldReturnNullAndLogAnErrorMessage() {
+    // given
+    Logger rootLogger = Logger.getRootLogger();
+    if (rootLogger.getAllAppenders().hasMoreElements()) {
+        fail("Root logger already has appenders!");
+    }
+   
+    // setup the OutputStream to be written to by the logger
+    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+   
+    rootLogger.addAppender(new WriterAppender(new SimpleLayout(),
+            outputStream));
+    rootLogger.setLevel(Level.DEBUG);
+   
+    // when
+    Plebeian plebeian = PlebeianFactory.getInstance(null);
+   
+    // then
+    assertThat(plebeian, is(nullValue()));
+   
+    // split the output by newline
+    String[] allLogStatements = new String(outputStream.toByteArray())
+            .split(lineSeparator);
+   
+    List&lt;String&gt; nonDebugLogStatements = filterOutDebugStatements(allLogStatements);
+    
+    // verify that at least 1 DEBUG message was output (if there are any)
+    assertThat(allLogStatements.length - nonDebugLogStatements.size(),
+        is(greaterThan(0)));
+
+    assertThat(nonDebugLogStatements.size(), is(1));
+    assertThat(nonDebugLogStatements.get(0),
+            is("ERROR - Delimited String input cannot be null"));
+   
+}</code></pre>
+<h3>
+	Bonus - Verifying a Class Uses the Correct Logger</h3>
+<p>Occasionally when copying a class containing a Logger in Eclipse I'll forget to change the class the Logger instantiates from. That is, if I copied PlebeianFactory to SomeOtherFactory, my static Logger instantiation line would remain:</p>
+<pre class="prettyprint">
+<code>private static Logger logger = Logger.getLogger(PlebeianFactory.class);</code></pre>
+<p>instead of the intended:</p>
+<pre class="prettyprint">
+<code>private static Logger logger = Logger.getLogger(SomeOtherFactory.class);</code></pre>
+<p>This would obviously cause problems when I'm looking thru my log files and never see any log messages from SomeOtherFactory. Fortunately it's easy to check for this using a PatternLayout. Here's the test method:</p>
+<pre class="prettyprint">
+<code>@Test
+public void nullInputToGetInstanceShouldReturnNullAndLogADebugAndErrorMessage() {
+    // given
+    Logger rootLogger = Logger.getRootLogger();
+    if (rootLogger.getAllAppenders().hasMoreElements()) {
+        fail("Root logger already has appenders!");
+    }
+   
+    // setup the OutputStream to be written to by the logger
+    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+   
+    // this pattern will output the last element in the dot-delimited
+    //  fully-qualified class name
+    PatternLayout patternLayout = new PatternLayout("%C{1}");
+    
+    rootLogger.addAppender(new WriterAppender(patternLayout,
+            outputStream));
+    rootLogger.setLevel(Level.DEBUG);
+   
+    // when
+    // assuming this execution path actually triggers a logging event
+    SomeOtherFactory.getInstance(null);
+   
+    // then
+   
+    // split the output by newline
+    String[] logStatements = new String(outputStream.toByteArray())
+            .split(lineSeparator);
+   
+    assertThat(logStatements[0], is("SomeOtherFactory"));
+    
+}</code></pre>
+<p>Of course, this depends on testing an execution path resulting in at least one logging event. Note that the fully-qualified class name could be output using "<code>%C</code>" instead of of "<code>%C{1}</code>" but that would lead to high degree of brittleness and make future refactorings very difficult since moving a class among packages would require changing tests.</p>
+<h3>
+	Summary</h3>
+<p>It's a bit too OCD even for me to unit test logj4 debugging statements, mainly because doing so makes your tests very brittle and maintaining those tests would be hell.  Testing INFO and higher statements has a lot of utility since if someone cares enough to trigger a non-DEBUG logging event, it's worth verifying that what the output of that event was.  The approach taken above of enabling DEBUG-level messages but throwing them out before my assertions satisfies my OCD urges to get my coverage graphs to 100% while at the same time making tests useful enough to not annoy my coworkers with brittle and overly-rigid tests. </p>

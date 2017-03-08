@@ -1,0 +1,110 @@
+title=Taking things too far: Testing @WebServlet annotations
+date=2014-08-15
+type=post
+tags=taking things too far, unit test, spock, tdd
+status=published
+~~~~~~
+
+<p>It's been quite awhile since I last posted but my wife and I had a kid in November and, despite my very vocal protestations, diapers trump TDD.  Today's article is a short one, but I've found it useful ever since switching away from servlet definitions in web.xml to inline @WebServlet annotations.  It's applicable to any type of annotations, I suppose, but for me the @WebServlet annotation comes up quite a bit in my day-to-day development.  </p>
+
+<p>First, here's our servlet class definition:</p>
+
+<pre class="prettyprint">
+<code>@WebServlet(
+    name="Pleb Control", 
+    description="This servlet is for keeping the plebs in check",
+    loadOnStartup=1, 
+    asyncSupported=true,
+    urlPatterns={
+        "/stupidplebs/subjugateBrutually", 
+        "/stupidplebs/governFairly"
+    }, 
+    initParams = {
+        @WebInitParam(name="enforcementMethod1", value="the stink eye"),
+        @WebInitParam(name="enforcementMethod2", value="propaganda")
+    }
+)
+public class StupidPlebServlet extends HttpServlet {
+    @Override
+    public void doGet(HttpServletRequest request, HttpServletResponse response) {
+        // do some stuff
+    }
+}
+</code>
+</pre>
+<!--break-->
+
+<p>Back in the day when all your servlet and filter definitions were listed in web.xml, it was a bit cumbersome but quite possible to load web.xml in a test and verify settings using an XML parser.  Inlining your servlet and filter configurations using @WebServlet and @WebFilter annotations doesn't work with this method but fortunately Java makes it pretty easy to iterate the declared annotations for a class and perform verifications.  Here's a test in JUnit:</p>
+
+<pre class="prettyprint">
+<code>@Test
+public void webServletAnnotationShouldBeConstructedWithExpectedConfigurationSettings() {
+    // Given the first annotation (assumed to be WebServlet)
+    WebServlet annotation = (WebServlet)StupidPlebServlet.class.getDeclaredAnnotations()[0];
+    
+    // Expect
+    assertThat(annotation.name(), is("Pleb Control"));
+    
+    // And
+    assertThat(annotation.description(), is(
+            "This servlet is for keeping the plebs in check"));
+    
+    // And the servlet should be loaded when the container starts
+    assertThat(annotation.loadOnStartup(), is(1));
+    
+    // And asynchronous processing should be supported
+    assertThat(annotation.asyncSupported(), is(true));
+    
+    // And the servlet should be mapped to 2 url patterns
+    assertThat(annotation.urlPatterns(), is(new String[]{
+            "/stupidplebs/subjugateBrutually", 
+            "/stupidplebs/governFairly"
+    }));
+    
+    // And there should be 2 initialization parameters
+    assertThat(annotation.initParams().length, is(2));
+    assertThat(annotation.initParams()[0].name(), is("enforcementMethod1"));
+    assertThat(annotation.initParams()[0].value(), is("the stink eye"));
+    assertThat(annotation.initParams()[1].name(), is("enforcementMethod2"));
+    assertThat(annotation.initParams()[1].value(), is("propaganda"));
+}
+</code>
+</pre>
+
+<p>Here's the same test in Spock:</p>
+
+<pre class="prettyprint"><code>def "@WebServlet annotation should be constructed with expected configuration settings"() {
+    given: "groovy makes it easier to find the annotation we're interested"
+    def annotation = StupidPlebServlet.class.declaredAnnotations.find { it ->
+        it instanceof WebServlet
+    }
+    
+    expect:
+    annotation.name() == "Pleb Control"
+    
+    and:
+    annotation.description() == 
+            "This servlet is for keeping the plebs in check"
+    
+    and: "the servlet should be loaded when the container starts"
+    annotation.loadOnStartup() == 1
+    
+    and: "asynchronous processing should be supported"
+    annotation.asyncSupported()
+    
+    and: "the servlet should be mapped to 2 url patterns"
+    annotation.urlPatterns() == [
+        "/stupidplebs/subjugateBrutually", 
+        "/stupidplebs/governFairly"
+    ]
+    
+    and: "there should be 2 initialization parameters"
+    annotation.initParams().length == 2
+    annotation.initParams()[0].name() == "enforcementMethod1"
+    annotation.initParams()[0].value() == "the stink eye"
+    annotation.initParams()[1].name() == "enforcementMethod2"
+    annotation.initParams()[1].value() == "propaganda"
+}
+</code></pre>
+
+This makes a very easy and convenient verification that a servlet will be loaded correctly by the container.  

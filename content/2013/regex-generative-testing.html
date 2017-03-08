@@ -1,0 +1,134 @@
+title=Generative Testing is Even Awesomer for Testing Regular Expressions
+date=2013-08-27
+type=post
+tags=parameterized, unit test, regex, regular expressions, groovy, generative testing
+status=published
+~~~~~~
+
+<p>I attended a presentation by Stu Halloway on generative testing in Clojure at Uberconf 2013 in Denver a few weeks ago and it piqued my interest.  Now I may be completely off on this (hell, I thought my coworker Sanjay stole the Lindbergh baby) but generative testing is for auto-generating tons of tests where the unit of code under test has a combinatorically prohibitive input space.  Stu gave the example of a game that tests for colored pegs in a correctly ordered sequence.  While revisiting some functionality recently that formats a string to Canadian postal code format if it matches a regular expression that allows for case-insensitivity and an optional space or hyphen delimiter, I realized that generative testing is a great technique for this functionality.</p>
+<!--break-->
+
+<p>Canadian postal code is in 2 parts, the first three characters are called the "forward sortation area" (in letter-number-letter sequence) while the last three are called the "local delivery units" (in number-letter-number sequence).  For example, K8N 5W6 identifies Belleville, Ontario.  For my purposes, the local delivery unit part is optional and the delimiter can be a space or hyphen.  The output should be uppercased forward sortation area followed by a space and local delivery unit if the latter was matched.  A basic case-insensitive regex with optional delimiter is:</p>
+
+<pre class="prettyprint">
+<code>([a-zA-Z][0-9][a-zA-Z])(?:[ -]?([0-9][a-zA-Z][0-9]))?</code></pre>
+
+<p>I could also just dumbly iterate over the 140,608,000 possible inputs from 'a0a 0a0' to 'Z9Z-9Z9' (this is just an illustration, there aren't that many recognized Canadian postal codes), but that would take a while.  My Mac took over 4 minutes to iterate just the 17,576,000 lowercase and digit combinations.  Alternatively, I could manually generate 20 "random" inputs and call it a day, but what if some Hogan comes along and changes the regex removing 'a' and 'A' as a first character:</p>
+
+<pre class="prettyprint"><code>([b-zB-Z][0-9][a-zA-Z])(?:[ -]?([0-9][a-zA-Z][0-9]))?</code></pre>
+
+<p>which will completely invalidate Newfoundland and Labrador postal codes.  Unless I happened to have a test for postal codes starting with 'A', the unit tests would still pass, but the code now has a bug.  </p>
+
+<p>Exhaustively testing the entire input set isn't feasible and how many manual tests is enough?  Fortunately, generative testing (assuming my understanding is correct) is a far superior approach.  The strategy is to generate random letters, numbers, and delimiters concatenated together and test that the formatter returns the output as expected.</p>
+
+<p>I've recently jumped on the Groovy bandwagon, so here's my class under test:</p>
+
+<pre class="prettyprint">
+<code>class CanadianPostalCodeFormatter {
+    def format(input) {
+        // regex that captures the forward sortation area (the first part),
+        //  the optional local delivery unit (the second part), and ignores the delimiter
+        def matcher = input =~ /([a-zA-Z][0-9][a-zA-Z])(?:[ -]?([0-9][a-zA-Z][0-9]))?/ 
+        
+        if (matcher.size() > 0) {
+            // return the concatenated-by-space non-null matched groups
+            matcher[0][1..2].findAll{ it }*.toUpperCase().join(" ")
+        }
+
+    }
+
+}</code></pre>
+
+<p>Now here's my Spock test:</p>
+
+<pre class="prettyprint"><code>@ConfineMetaClassChanges(String)
+class CanadianPostalCodeFormatterSpec extends Specification {
+    // specifically call out how many tests to run so it's easily tunable
+    @Shared def numberOfTests = 10000
+    
+    @Shared def formatter = new CanadianPostalCodeFormatter()
+    @Shared def random = new Random()
+    
+    @Shared def letters = (('A'..'Z') + ('a'..'z')).join()
+    @Shared def numbers = ('0'..'9').join()
+    @Shared def delimiters = " -"
+
+    def setupSpec() {
+        // add a method to String that will return a random character from delegate
+        String.metaClass.randomCharacter = { ->
+            delegate[ random.nextInt(delegate.length()) ]
+        }
+    }
+    
+    def "valid input should return space-delimited forward sortation area and local delivery unit (if supplied)"() {
+        when:
+        def actualOutput = formatter.format(input)
+
+        then:
+        expectedOutput == actualOutput
+
+        where:
+        row &lt;&lt; (1..numberOfTests).collect {
+            generatePostalCode()
+        }
+
+        input = row.input
+        expectedOutput = row.expectedOutput
+
+    }
+    
+    def generatePostalCode() {
+        // randomly generate either a short or long form postal code 
+        random.nextBoolean() ? generateShortForm() : generateLongForm()
+    }
+    
+    // generate a short-form CA postalcode, with just forward sortation area
+    def generateShortForm() {
+        // eg - K8N
+        def forwardSortationArea = [letters, numbers, letters]*.randomCharacter().join()
+
+        def inputPostalCode = forwardSortationArea
+        def outputPostalCode = forwardSortationArea.toUpperCase()
+            
+        // return in a map since both input and output are needed
+        [input: inputPostalCode, expectedOutput: outputPostalCode]
+        
+    }
+    
+    // generate a long-form CA postalcode, with both forward sortation area and
+    //  local delivery unit
+    def generateLongForm() {
+        // eg - K8N
+        def forwardSortationArea = [letters, numbers, letters]*.randomCharacter().join()
+        // eg - 5W6
+        def localDeliveryUnit = [numbers, letters, numbers]*.randomCharacter().join()
+                
+        def delimiter = random.nextBoolean() ? delimiters.randomCharacter() : ""
+        
+        def inputPostalCode = [
+            forwardSortationArea, localDeliveryUnit].join(delimiter)
+        def outputPostalCode = [
+            forwardSortationArea, localDeliveryUnit]*.toUpperCase().join(" ")
+            
+        // return in a map since both input and output are needed
+        [input: inputPostalCode, expectedOutput: outputPostalCode]
+            
+    }
+    
+}</code></pre>
+
+<p>Having a variable named numberOfTests right at the top allows me to easily tune how many tests I want to run.  For illustration, I set this to 10, and the following inputs were generated:</p>
+
+<pre>
+<code>A6S
+L2e
+j7Q1r9
+x8r-9f7
+M7w0B9
+i4S 0d3
+S2i5J4
+c5v6A5
+R8l
+y7J 7F5</code></pre>
+
+<p>The value of the tuning parameter depends on the situation; enough tests to be reasonably thorough but not too many to be burdensome time-wise should be considered.  I set this value to 10,000 since the input space has pretty good coverage and isn't so long that it's noticeable.  Now if some Hogan comes along and changes the internal regex, there's a pretty good chance that one run of the tests (locally, in a CI environment, or by another developer), will catch the error as the test inputs are random (for all intents and purposes).  In fact, I removed 'a' and 'A' for the first character and in 15 attempts I couldn't get all 10,000 tests to pass once.</p>

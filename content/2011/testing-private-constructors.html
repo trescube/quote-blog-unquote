@@ -1,0 +1,79 @@
+title=Unit testing private constructors
+date=2011-12-09
+type=post
+tags=private constructors, tdd, OCD, unit testing
+status=published
+~~~~~~
+
+<p>Private constructors in your factories messing up your coverage graphs?  I'm a bit OCD about my unit testing and like to get all my cobertura graphs to 100% but the problem is I sometimes have classes or factories that contain only statics and the default empty private constructor.  Sure I could declare my default empty constructor public, but I'm also a bit adamant that if my code does something, it had better have a purpose and if I'm willing to just have public constructors when there's no reason for it, well then society may just as well be on the cusp of anarchy.  I digress.  My statics are well-tested, but cobertura complains that the private constructor that doesn't actually do anything is untested code. </p>
+<!--break-->
+<p>First of all, I'm going to establish a standard set of objects that I'll continue to revisit for my examples.  Starting simple, I have my <code>Plebeian</code> class that just takes a first and last name <code>String</code> parameters.  Being that plebeians are, well, just plebeians, do they really need anything more than that?  Here's my class:</p>
+<pre class="prettyprint">
+<code>public class Plebeian {
+    private final String firstName;
+    private final String lastName;
+    
+    public Plebeian(final String firstName, final String lastName) {
+        this.firstName = firstName;
+        this.lastName = lastName;
+        
+    }
+    
+    public String getFirstName() {
+        return firstName;
+    }
+    
+    public String getLastName() {
+        return lastName;
+    }
+    
+}</code></pre>
+<p>They're assigned a first and last name when constructed which they can be asked for but can't be changed, and that's pretty much all the excitement they'll ever have in their miserable little lives. </p>
+<p>Here's my factory that creates <code>Plebeian</code> objects:</p>
+<pre class="prettyprint">
+<code>public class PlebeianFactory {
+    private PlebeianFactory() {
+    }
+    
+    public static Plebeian getInstance(final String firstName, final String lastName) {
+        return new Plebeian(firstName, lastName);
+    }
+    
+}</code>
+</pre>
+<p>It just exposes an static <code>getInstance</code> method for creating <code>Plebeian</code> objects and the constructor is private since there's no purpose in creating an instance of the factory.  Testing that the <code>getInstance</code> method returns me a <code>Plebeian</code> object with the first and last names I supplied is pretty easy:</p>
+<pre class="prettyprint">
+<code>@Test
+public void plebeianShouldBeCreatedWithFirstAndLastNamesSupplied() {
+    Plebeian plebeian = PlebeianFactory.getInstance("Joe", "Pleb");
+    
+    assertThat(plebeian.getFirstName(), is("Joe"));
+    assertThat(plebeian.getLastName(), is("Pleb"));
+    
+}</code>
+</pre>
+<p>You're now confident that you've fully tested your factory and are anxiously awaiting acknowledgement from cobertura that you're a valuable human being contributing to the planet.  Unfortunately, while your coworkers were basking in your glow of how cool you are because you practice good TDD, cobertura was busy letting you know that your private constructor isn't tested.  Dumb, right?  Yeah, I know, and most people would let this slide, but you're not most people.  You're obsessive compulsive like me and are lookin' to lie to your bean-counting project manager and eschew dedicating time to more important tasks to instead get 100% coverage on this bad boy.  After all, someone could call this constructor using reflection and what if it bombs?  That's my justification, at least.  Fortunately, you can use reflection for testing, too.  Reflection in Java lets you find out all sorts of interesting information about classes, methods, annotations, et cetera, including finding private constructors and calling them on the sly. </p>
+<p>For the purpose of this example, we're going to assert some things about our private constructor, then call the constructor:</p>
+<pre class="prettyprint">
+<code>@Test
+public void plebeianFactoryPrivateConstructorShouldNotThrowException()
+throws Throwable {
+    // get the constructor that takes no parameters
+    Constructor&lt;?&gt; constructor = PlebeianFactory.class.getDeclaredConstructor((Class&lt;?&gt;[]) null);
+    
+    // the modifiers int can tell us metadata about the constructor
+    int constructorModifiers = constructor.getModifiers();
+    
+    // but we're only interested in knowing that it's private
+    assertThat(Modifier.isPrivate(constructorModifiers), is(true));
+    
+    // constructor is private so we first have to make it accessible
+    constructor.setAccessible(true);
+    
+    // now construct an instance
+    constructor.newInstance((Object[]) null);
+    
+}</code>
+</pre>
+<p>Using reflection modifiers metadata, we first assert that the default constructor is private.  Last, we use the constructor to instantiate the object with <code>newInstance</code> noting that if the constructor were for some reason to throw an exception, the test would fail.  Just looking at it we all know that the constructor doesn't actually do anything, but this is enough to appease the cobertura gods that you've tested it. </p>
+<p>I'd like to point out that this is an academic exercise and complete overkill.  Most people don't waste their time testing empty private constructors and it may anger your boss if he or she finds out you're writing these sorts of tests, but if you're bored on a Saturday and want to get closer to that coveted 100% coverage graph to tack to your cubicle wall, this is how you can go about doing so. </p>

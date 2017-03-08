@@ -1,0 +1,234 @@
+title=Negative Testing, Notably Injected Streams
+date=2011-12-09
+type=post
+tags=inputstream, tdd, java, negative testing
+status=published
+~~~~~~
+
+<p>In this post, I'll cover negative testing, which is to make sure we know what error conditions can occur and how to make sure our code can handle them appropriately.  Let's say that I want to track our plebs in a registry as just a list of <code>Plebeian</code> POJOs consisting of just a first and last name.  I can load my registry from an <code>InputStream</code> of newline-delimited String objects, each of which is itself a comma-delimited last and first names.  Constructing the registry should throw either an exception if something went wrong or complete and able to return an unmodifiable list of <code>Plebeian</code> objects. </p>
+<!--break-->
+<p>But first, I'll be up front about this:  the <a href="http://commons.apache.org/" target="_blank">Apache Commons</a> projects are freakin' awesome, especially <a href="http://commons.apache.org/lang/" target="_blank">Commons Lang</a> and <a href="http://commons.apache.org/io/" target="_blank">Commons IO</a>.  The reason they're so freakin' awesome is that they drastically reduce the amount of boilerplate code you need to write and add tons of one-liner convenience methods.  I highly recommend their usage in your code when allowed not only for ease of use but to reduce the amount of code that needs to be tested.  For this post I'll be using the following pieces of Commons functionality:</p>
+<ul>
+	<li>
+		<a href="http://commons.apache.org/lang/api-release/org/apache/commons/lang3/Validate.html#notNull%28T,%20java.lang.String,%20java.lang.Object...%29" target="_blank"><code>Validate.notNull</code></a> from Commons Lang for validating method parameters</li>
+	<li>
+		<a href="http://commons.apache.org/lang/api-release/org/apache/commons/lang3/StringUtils.html#splitPreserveAllTokens%28java.lang.String,%20java.lang.String,%20int%29" target="_blank"><code>StringUtils.splitPreserveAllTokens</code></a> from Commons Lang for splitting a delimited <code>String</code> without having to worry about Java's standard <code>String.split</code> oddities</li>
+	<li>
+		<a href="http://commons.apache.org/io/api-release/org/apache/commons/io/IOUtils.html#readLines%28java.io.InputStream%29" target="_blank"><code>IOUtils.readLines</code></a> from Commons IO to easily read all lines from an <code>InputStream</code> to a <code>List&lt;String&gt;</code></li>
+</ul>
+<p>My <code>Plebeian</code> object is just a POJO with two fields: <code>lastName</code> and <code>firstName</code>.  Here's my <code>PlebeianRegistry</code> object:</p>
+<pre class="prettyprint">
+<code>public class PlebeianRegistry {
+    private final List&lt;Plebeian&gt; plebeians = new ArrayList&lt;Plebeian&gt;();
+    
+    public PlebeianRegistry(final InputStream inputStream)
+    throws IOException {
+        Validate.notNull(inputStream, "InputStream parameter cannot be null");
+        final List&lt;String&gt; lines = IOUtils.readLines(inputStream);
+        
+        for (final String line : lines) {
+            // get max of 2 delimited fields
+            final String[] fields = StringUtils.splitPreserveAllTokens(
+                    line, ",", 2);
+            
+            // only honor entries with two fields
+            if (fields.length == 2) {
+                final String lastName = fields[0];
+                final String firstName = fields[1];
+                
+                plebeians.add(new Plebeian(lastName, firstName));
+            }
+            
+        }
+
+    }
+    public List&lt;Plebeian&gt; getPlebeians() {
+        return Collections.unmodifiableList(plebeians);
+    }
+    
+}</code>
+</pre>
+<p>There are a number of ways that constructing our registry of plebs could go wrong:</p>
+<ol>
+	<li>
+		The <code>InputStream</code> parameter could be null</li>
+	<li>
+		Reading from the <code>InputStream</code> could throw an exception</li>
+	<li>
+		A line of input could have fewer or more than 2 fields</li>
+</ol>
+<p>All of these behaviors signal errors that could occur when constructing the registry and because I want to know how I'm handling error conditions, I write negative tests that simulate cases where things do go wrong. </p>
+<p>First, what happens when the caller passes <code>null</code> to the <code>PlebeianRegistry</code> constructor?  I could just wait til the constructor tries to read from the <code>InputStream</code> and then track down the line of code but if the reading is part of a big ol' line of complex code, it can be tricky to track down exactly what threw the <code>NullPointerException</code>.  And what if a bunch of other things happened before the read (such as opening, writing to, and closing a file) that can't easily be rolled back?  It's usually best to exit as soon as we know something's wrong.  To achieve this, the first thing the constructor does is verify that the <code>InputStream</code> parameter is not null:</p>
+<pre class="prettyprint">
+<code>Validate.notNull(inputStream, "InputStream parameter cannot be null");</code></pre>
+<p>I get a helpful error message stating that the supplied parameter can't be null.  This behavior is easily verified with the following test:</p>
+<pre class="prettyprint">
+<code>@Test(expected=NullPointerException.class)
+public void nullInputStreamParameterShouldThrowException()
+throws IOException {
+    InputStream inputStream = null;
+    new PlebeianRegistry(inputStream);   
+}</code></pre>
+<p>The <code>@Test</code> annotation takes an optional parameter named <code>expected</code> that tells jUnit that I expect a <code>NullPointerException</code> to be thrown when passing a null <code>InputStream</code> to the <code>PlebeianRegistry</code> constructor.  Alternatively, if I wanted to check the text of exception message, I could write the test as:</p>
+<pre class="prettyprint">
+<code>@Test
+public void nullInputStreamParameterShouldThrowExceptionWithExpectedMessage()
+throws IOException {
+    InputStream inputStream = null;
+    
+    try {
+        new PlebeianRegistry(inputStream);
+    }
+    catch (NullPointerException e) {
+        assertThat(e.getMessage(), is("InputStream parameter cannot be null"));
+    }
+    
+}</code>
+</pre>
+<p>Second, what happens when reading from the <code>InputStream</code> throws an <code>IOException</code>?  This can occur for a variety of reasons, but how I get an <code>InputStream</code> to throw an <code>Exception</code>?  By mocking one out via simple extension, of course!  In this test, I give myself a little helper class that extends <code>InputStream</code> and throws an <code>IOException</code> whenever the <code>read()</code> method is called:</p>
+<pre class="prettyprint">
+<code>class ExceptionThrowingInputStream extends InputStream {
+    @Override
+    public int read() throws IOException {
+        throw new IOException("This is a purposeful " +
+                "exception for negative testing");
+    }
+    
+}</code></pre>
+<p>Now I can just pass in an instance of my exception-throwing <code>InputStream</code> to my <code>PlebeianRegistry</code> constructor and test away:</p>
+<pre class="prettyprint">
+<code>@Test(expected=IOException.class)
+public void badStreamShouldThrowException()
+throws IOException {
+    InputStream inputStream = new ExceptionThrowingInputStream();
+    
+    new PlebeianRegistry(inputStream);
+    
+}</code>
+</pre>
+<p>All this test says is that when my <code>InputStream</code> throws an <code>IOException</code>, I expect to see it bubble up to the caller. </p>
+<p>Third, what happens when a line from the <code>InputStream</code> contains fewer or more than two fields?  The data in the input could have been corrupted for some reason so only the last name appears or perhaps the plebs first name (the second field) contains a comma.  To accommodate both conditions, I use the Commons Lang method <code>StringUtils.splitPreserveAllTokens</code> passing the max number of tokens I want, followed up with a check on how many fields I actually got.  I only want lines of input containing two fields and ignoring input lines containing one field and can do so with this test:</p>
+<pre class="prettyprint">
+<code>@Test
+public void linesWithLessThan2FieldsShouldBeIgnored()
+throws IOException {
+    String lineSeparator = System.getProperty("line.separator");
+    
+    StringBuilder sb = new StringBuilder();
+    sb.append("plebs last name").append(lineSeparator);
+    
+    // use IOUtils to convert the string to an InputStream
+    InputStream inputStream = IOUtils.toInputStream(sb.toString());
+    
+    PlebeianRegistry registry = new PlebeianRegistry(inputStream);
+    
+    // the registry should be empty
+    assertThat(registry.getPlebeians().isEmpty(), is(true));
+    
+}</code>
+</pre>
+<p>The registry was successfully constructed by is empty since the only line of input contained a single field and was ignored.  Conversely, the plebs first name may actually contain a comma that we want to preserve:</p>
+<pre class="prettyprint">
+<code>@Test
+public void linesWithMoreThan1CommaShouldTreatSecondAsPartOfFieldText()
+throws IOException {
+    String lineSeparator = System.getProperty("line.separator");
+    
+    StringBuilder sb = new StringBuilder();
+    sb.append("harris,bill,schmoe").append(lineSeparator);
+    
+    // use IOUtils to convert the string to an InputStream
+    InputStream inputStream = IOUtils.toInputStream(sb.toString());
+    
+    PlebeianRegistry registry = new PlebeianRegistry(inputStream);
+    
+    // there should be 1 Plebeian object in the registry
+    assertThat(registry.getPlebeians().size(), is(1));
+    
+    Plebeian plebeian = registry.getPlebeians().get(0);
+    assertThat(plebeian.getLastName(), is("harris"));
+    assertThat(plebeian.getFirstName(), is("bill,schmoe"));
+    
+}</code></pre>
+<p>In the last line the test verifies that constructor preserved the second comma as part of the plebs first name.</p>
+<p>For good measure, I threw in some extra tests that aren't necessarily negative tests but verify certain behaviors that I haven't covered in other posts to date:</p>
+<ul>
+	<li>
+		The <code>InputStream</code> should be fully read by the constructor</li>
+	<li>
+		The returned <code>List</code> of <code>Plebeian</code> objects should not be modifiable</li>
+</ul>
+<p>Testing the first is simply a matter of noting that in the Java API for <a href="http://docs.oracle.com/javase/6/docs/api/java/io/InputStream.html#read%28%29" target="_blank"><code>read()</code></a>, -1 should be returned when the end of stream is reached:</p>
+<pre class="prettyprint">
+<code>@Test
+public void linesWith2FieldsShouldBeHonoredAndInputFullyRead()
+throws IOException {
+    String lineSeparator = System.getProperty("line.separator");
+    
+    StringBuilder sb = new StringBuilder();
+    sb.append("plebovitz,joe").append(lineSeparator);
+    sb.append("plebington,sam").append(lineSeparator);
+    
+    // use IOUtils to convert the string to an InputStream
+    InputStream inputStream = IOUtils.toInputStream(sb.toString());
+    
+    PlebeianRegistry registry = new PlebeianRegistry(inputStream);
+    
+    // first assert that the entire stream has been read
+    // -1 is returned if there's nothing left to read
+    assertThat(inputStream.read(), is(-1));
+    
+    // there should be 2 Plebeian objects in the registry
+    assertThat(registry.getPlebeians().size(), is(2));
+    
+}</code>
+</pre>
+<p>The second behavior is that I don't want a caller constructing a <code>PlebeianRegistry</code> to be able to modify the list, such as adding or removing <code>Plebeian</code> objects or even clearing the entire list.  To do so, note the getter for the list:</p>
+<pre class="prettyprint">
+<code>public List&lt;Plebeian&gt; getPlebeians() {
+    return Collections.unmodifiableList(plebeians);
+}</code></pre>
+<p><a href="http://docs.oracle.com/javase/6/docs/api/java/util/Collections.html#unmodifiableList%28java.util.List%29" target="_blank"><code>Collections.unmodifiableList</code></a> is a simple wrapped provided by Java itself that throws <code>UnsupportedOperationException</code>s whenever an attempt is made to modify the list.  Note that it doesn't stop someone from modifying the objects within the list, only that the list itself cannot be added to or removed from.  Testing that the list returned is not modifiable is easy with this test:</p>
+<pre class="prettyprint">
+<code>@Test(expected=UnsupportedOperationException.class)
+public void listOfPlebeiansShouldNotBeModifiable()
+throws IOException {
+    String lineSeparator = System.getProperty("line.separator");
+    
+    StringBuilder sb = new StringBuilder();
+    sb.append("pleb,joe").append(lineSeparator);
+    
+    // use IOUtils to convert the string to an InputStream
+    InputStream inputStream = IOUtils.toInputStream(sb.toString());
+    
+    PlebeianRegistry registry = new PlebeianRegistry(inputStream);
+    
+    registry.getPlebeians().clear();
+    
+}</code>
+</pre>
+<p>An effect of the <code>expected</code> annotation is that the test only says that an <code>UnsupportedOperationException</code> is thrown <em>somewhere</em> in the code, not exactly which line threw it.  If I wanted to be absolutely certain of the line that the <code>UnsupportedOperationException</code> was thrown, I'd have to write the test using <code>fail()</code>:</p>
+<pre class="prettyprint">
+<code>@Test
+public void listOfPlebeiansShouldNotBeModifiable2()
+throws IOException {
+    String lineSeparator = System.getProperty("line.separator");
+    
+    StringBuilder sb = new StringBuilder();
+    sb.append("pleb,joe").append(lineSeparator);
+    
+    // use IOUtils to convert the string to an InputStream
+    InputStream inputStream = IOUtils.toInputStream(sb.toString());
+    
+    PlebeianRegistry registry = new PlebeianRegistry(inputStream);
+    
+    try {
+        registry.getPlebeians().clear();
+        fail("An UnsupportedOperationException should've been thrown");
+    }
+    catch (UnsupportedOperationException e) {}
+    
+}</code></pre>
+<p><br />
+	Surrounding the call to <code>clear()</code> in a try-catch block allows the <code>UnsupportedOperationException</code> to be caught and handled before the <code>fail()</code> has a chance to fail the test. </p>
+<p>Negative testing is a very aspect part of test-driven development and can get dramatically more involved than these simple examples but doing so can get you closer to 100% coverage and very important to verifying business requirements. </p>

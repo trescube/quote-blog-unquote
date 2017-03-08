@@ -1,0 +1,44 @@
+title=assertThat versus assertEquals
+date=2011-12-03
+type=post
+tags=assertThat, java, junit
+status=published
+~~~~~~
+
+<p>Some time ago, JUnit added <code>assertThat</code> as a replacement to <code>assertEquals</code>, <code>assertTrue</code>, <code>assertNull</code>, etc. Originally, assertions were written as</p>
+<ul>
+	<li>
+		<code>assertEquals("stupidplebs.com", site.getMostAwesome());</code></li>
+	<li>
+		<code>assertTrue(site.isMostAwesomeSite("stupidplebs.com"));</code></li>
+	<li>
+		<code>assertNulhl(site.getAwesomerSiteThanStupidPlebs());</code></li>
+</ul>
+<p>This always struck me as a little odd because, especially true for <code>assertEquals</code>, the order actual and expected parameters order didn't matter which made reading the purpose of the test a little hard to read. That is,</p>
+<code>assertEquals("stupidplebs.com", site.getMostAwesome());</code>
+<p>is the equivalent to</p>
+<code>assertEquals(site.getMostAwesome(), "stupidplebs.com");</code>
+<!--break-->
+<p>Sure, content assist in your IDE and JUnit API orders them as "actual first, expected second" but developers are creatures of habit and can't be trusted to actually put the parameters in that order. Also, and probably more to the point, the test is awkward to read from a grammatical perspective. Read left to right (like English), it's "I'm asserting the equality of 'stupidplebs.com' to the return value of the site objects' <code>getMostAwesome()</code>method". For <code>assertTrue</code> it reads as "I'm asserting the truthfulness of the site objects' <code>isMostAwesomeSite()</code>method". Hard to read, no? Well, at least to me it is, YMMV. To read like an English sentence, your eyes have to jump back and forth between the parts of the assertion.</p>
+<p>Then I found out about <code>assertThat</code> which, at first, seemed too touchy-feely for my liking. After all, tests are blunt and, besides, I've already written a few thousand assertions that I'd have to fix and <code>assertEquals</code>/<code>True</code>/<code>Null</code>/<code>False</code>/<code>NotNull</code>/<code>Same</code>/<code>NotSame</code>have worked fine so far, so why change now? I decided to give it a go and after some fighting with Eclipse content assist, I was pleased with what I found.</p>
+<p>Much to my delight, with <code>assertThat</code>, the assertion reads more like an English sentence, speeding up comprehension of tests written by other developers and when revisiting tests I haven't seen in a while. For example, the above three tests can be written as:</p>
+<ul>
+	<li>
+		<code>assertThat(site.getMostAwesome(), is("stupidplebs.com"));</code></li>
+	<li>
+		<code>assertThat(site.isMostAwesomeSite("stupidplebs.com"), is(true));</code></li>
+	<li>
+		<code>assertThat(site.getAwesomerSiteThanStupidPlebs(), is(nullValue()));</code></li>
+</ul>
+<p>Now the first test reads as:</p>
+<p>"I'm asserting that the return value of the site objects' <code>getMostAwesome()</code> method is 'stupidplebs.com'"</p>
+<p>The second reads as "I'm asserting that the return value of site objects' <code>isMostAwesomeSite()</code> method is true"</p>
+<p>Reads more easily, no? Not only that, by standardizing on a single assert method, after a few times reading tests your eyes can skip over the <code>assertThat</code> part, resulting in:</p>
+<p>"the return value of the site objects' <code>getMostAwesome()</code> method is 'stupidplebs.com'"</p>
+<p>With <code>assertThat</code>, the <code>is() </code>method you see is called a matcher. There are a number of matchers available and can be chained together, as in:</p>
+<code>assertThat(site.isMostAwesomeSite("stupidplebs.com"), is(not(false))));</code>
+<p>and</p>
+<code>assertThat(site, is(not(nullValue()));</code>
+<p>The last example was done to show an example of chaining, it could also be written as:</p>
+<code>assertThat(site, is(notNullValue()));</code>
+<p>Where there were only so many assert methods available in previous versions of JUnit before having to write your own and dealing with your IDEs fussiness of custom assert methods, with <code>assertThat</code>, if a combination of matchers doesn't solve your problem, you can write your own matchers by extending org.hamcrest.BaseMatcher. I'll make a mental note to create some custom matchers and post an article about them.</p>

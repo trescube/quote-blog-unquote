@@ -1,0 +1,92 @@
+title=Building Random Strings for Generatively Testing Regular Expressions
+date=2015-03-27
+type=post
+tags=generative testing, regex, groovy, spock
+status=published
+~~~~~~
+
+After spending some time working with generating random strings for testing regular expressions, I decided to write a utility to make things easier to read and reduce the amount of code in my tests.  The library is here:
+
+https://github.com/stephenkhess/RandomStringBuilder
+<!--break-->
+I'll revisit the original example of formatting Canadian postal codes, so here's the class under test:
+
+<pre class="prettyprint">
+<code>class CanadianPostalCodeFormatter {
+    def format(input) {
+        // regex that captures the forward sortation area (the first part),
+        //  the optional local delivery unit (the second part), and ignores the delimiter
+        def matcher = input =~ /(?i)^([A-Z][0-9][A-Z])(?:[ -]?([0-9][A-Z][0-9]))?$/
+        
+        if (matcher.size() > 0) {
+            // return the concatenated-by-space non-null matched groups
+            matcher[0][1..2].findAll{ it }*.toUpperCase().join(" ")
+        }
+
+    }
+
+}</code></pre>
+
+Using RandomStringBuilder, our test of formatting extended Canadian postal codes would look like:
+
+<pre class="prettyprint">
+<code>class CanadianPostalCodeFormatterSpec extends Specification {
+    def "valid input should return space-delimited uppercased forward sortation area and local delivery unit"() {
+        given:
+        def formatter = new CanadianPostalCodeFormatter()
+        
+        and: "a forward sortation area, like 'k1A'"
+        def forwardSortationArea = new RandomStringBuilder().
+            oneLetter().oneNumber().oneLetter().
+            build()
+        
+        and: "a local delivery unit, like '0B1'"
+        def localDeliveryUnit = new RandomStringBuilder().
+            oneNumber().oneLetter().oneNumber().
+            build()
+            
+        and: "the concatenated input, like 'k1A-0B1'"
+        def input = new RandomStringBuilder().
+            is(forwardSortationArea).
+            optionalCharacterOf(" -").
+            is(localDeliveryUnit).
+            build()
+            
+        when:
+        def output = formatter.format(input)
+
+        then:
+        output == "${forwardSortationArea.toUpperCase()} ${localDeliveryUnit.toUpperCase()}"
+
+        where:
+        i &lt;&lt; (1..100)
+
+    }
+    
+}</code></pre>
+
+In this particular case, the test is run 100 times which should thoroughly exercise the letter and number ranges.  
+
+A more complicated regular expression is one that matches UK postal codes:
+
+<pre class="prettyprint"><code>^([A-Z]{1,2}[0-9][0-9A-Z]?) ?([0-9][A-Z]{2})$</code></pre>
+
+RandomStringBuilder makes short work of generating test inputs and in a very readable format:
+
+<pre class="prettyprint"><code>def outwardCode = new RandomStringGenerator.Builder().
+     atLeastOneLetter(2). // 1 or 2 letters
+     oneNumber().
+     optionalAlphaNumeric().
+     build()
+
+def inwardCode = new RandomStringGenerator.Builder().
+     oneNumber().
+     nLetters(2).
+     build()
+            
+def input = new RandomStringGenerator.Builder().
+     is(outwardCode).
+     optionalSpace().
+     is(inwardCode).
+     build()
+</code></pre>
