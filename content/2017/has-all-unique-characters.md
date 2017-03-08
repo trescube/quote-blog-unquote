@@ -7,17 +7,19 @@ status=published
 
 Lately I've been going through [Cracking the Coding Interview](https://www.amazon.com/Cracking-Coding-Interview-Programming-Questions/dp/0984782850/ref=sr_1_1?ie=UTF8&qid=1488990244&sr=8-1&keywords=cracking+the+coding+interview) and practicing generative testing approaches to some of the problems.  This will hopefully be the first in a number of posts about the problems found in that book.  I won't be posting solutions to the actual problems, but these posts will provide code and strategies for testing solutions that readers come up with.  
 
-## The Problem
+### The Problem
 
 The problem in the book states: Implement an algorithm to determine if a string has all unique characters.  Presumably this algorithm returns `true` if the string has all unique characters and `false` otherwise.  For example, strings like 'abc' would return `true` and `aba` would return `false`.  
 
-## Generative Tests
+<!--break-->
+
+### Generative Tests
 
 In my environment, the method under test is named `isAllUniqueChars` and the tests utilize a library I wrote called [RandomStringBuilder](https://github.com/trescube/RandomStringBuilder) to generate random strings but any function that generates random strings will do.  
 
 I fully admit that this is overkill for what is a relatively simple problem.  These tests are mainly for practice and illustration purposes.  
 
-### Tests for `true`
+#### Tests for `true`
 
 This test generates inputs that are known to contain all unique characters, an assertion we can make because of the usage of the  [`unique`](http://docs.groovy-lang.org/latest/html/groovy-jdk/java/util/Collection.html#unique()) collections method in groovy (if `unique` is broken then we have bigger things to worry about.)  We have to use `unique` because RandomStringBuilder is generating random strings and could very well contain duplicates.
 
@@ -49,7 +51,7 @@ I ran this locally and some of the generated inputs were:
 * `e5m`
 * `KYSb2Tofd`
 
-### Tests for `false`
+#### Tests for `false`
 
 It's fairly easy to test the positive case by using built-in collections methods that guarantee uniqueness, but how do we generate strings that are known to have duplicate characters?  One simple way would be to append the generated value to itself, so `abc` becomes `abcabc`.  This approach may not cover all cases depending on your solution's algorithm, so the approach I took was to generate a random string, then splice 1 or more characters of the string back into itself at a random index.  That is, if `a` is selected from `abc`, the value could become `aabc`, `abac`, or `abca`.
 
