@@ -21,7 +21,7 @@ I fully admit that this is overkill for what is a relatively simple problem.  Th
 
 #### Tests for `true`
 
-This test generates inputs that are known to contain all unique characters, an assertion we can make because of the usage of the  [`unique`](http://docs.groovy-lang.org/latest/html/groovy-jdk/java/util/Collection.html#unique()) collections method in groovy (if `unique` is broken then we have bigger things to worry about.)  We have to use `unique` because RandomStringBuilder is generating random strings and could very well contain duplicates.
+This test generates inputs that are known to contain all unique characters, an assertion we can make because of the usage of the  [`unique`](http://docs.groovy-lang.org/latest/html/groovy-jdk/java/util/Collection.html#unique%28%29) collections method in groovy (if `unique` is broken then we have bigger things to worry about.)  We have to use `unique` because RandomStringBuilder is generating random strings and could very well contain duplicates.
 
 ```groovy
 def "strings with all unique characters should return true"() {
